@@ -1,0 +1,13 @@
+services:
+  app:
+    build: ./Server
+    container_name: alto-chatbot-server
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./Server/auth_info_baileys:/app/auth_info_baileys
