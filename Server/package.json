@@ -9,8 +9,12 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "pino": "^10.4.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }
