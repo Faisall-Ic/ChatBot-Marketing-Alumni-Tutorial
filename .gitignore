@@ -1,2 +1,5 @@
 node_modules/
 .env
+auth_info_baileys/
+Server/auth_info_baileys/
+

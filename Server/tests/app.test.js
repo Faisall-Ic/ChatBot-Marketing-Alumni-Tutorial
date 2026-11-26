@@ -12,11 +12,13 @@ describe('utils/phone', () => {
     assert.equal(normalizePhone('6285794974290@s.whatsapp.net'), '6285794974290');
     assert.equal(normalizePhone('628123456:12@s.whatsapp.net'), '628123456');
     assert.equal(normalizePhone('1234567890@lid'), '1234567890@lid');
+    assert.equal(normalizePhone('lid:1234567890'), 'lid:1234567890');
   });
 
   it('membedakan nomor numerik valid dari JID @lid', () => {
     assert.equal(isNumericPhone('6285794974290'), true);
     assert.equal(isNumericPhone('1234567890@lid'), false);
+    assert.equal(isNumericPhone('lid:1234567890'), false);
   });
 });
 

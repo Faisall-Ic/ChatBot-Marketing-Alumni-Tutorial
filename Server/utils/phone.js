@@ -6,7 +6,7 @@ export function normalizePhone(rawPhone) {
   if (!rawPhone || typeof rawPhone !== 'string') return '';
 
   const trimmed = rawPhone.trim();
-  if (trimmed.endsWith('@lid')) {
+  if (trimmed.endsWith('@lid') || trimmed.startsWith('lid:')) {
     return trimmed;
   }
 
