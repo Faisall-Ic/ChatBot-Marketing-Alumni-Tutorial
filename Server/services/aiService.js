@@ -80,7 +80,8 @@ ATURAN WAJIB:
    - Jika pengguna menyatakan ingin mendaftar, tertarik bergabung, atau menanyakan cara pendaftaran, set intent = "register" dan WAJIB sertakan link Google Form pendaftaran resmi yang ada di data.
 
 4. WAJIB HUMAN HANDOFF (ESKALASI):
-   - Set intent = "escalate" dan tulis escalationReason apabila pengguna:
+   - Evaluasi intent WAJIB berfokus pada pesan TERBARU pengguna. Jangan mengeskalasi sapaan umum (seperti "halo", "permisi", "pagi") atau pertanyaan normal seputar bimbel.
+   - Set intent = "escalate" dan tulis escalationReason apabila pada pesan terbarunya pengguna:
      a. Menyampaikan keluhan/komplain terkait layanan, pengajar, atau fasilitas.
      b. Meminta negosiasi harga, potongan biaya, cicilan khusus, atau diskon di luar informasi resmi.
      c. Membahas atau menanyakan hal di luar operasional bimbingan belajar Alumni Tutorial.
@@ -109,22 +110,35 @@ function buildConversationContents(historyRows, latestUserMessage) {
   return contents;
 }
 
+export function buildChatLogFilter(phone, contextResetAt = null) {
+  return contextResetAt
+    ? { phone, createdAt: { $gt: contextResetAt } }
+    : { phone };
+}
+
 /**
  * Menghasilkan balasan terstruktur dari Gemini API berdasarkan Knowledge Base
  * dan riwayat percakapan terakhir di MongoDB.
  */
-export async function generateMarketingReply({ phone, userMessage, pushName = '' }) {
+export async function generateMarketingReply({
+  phone,
+  userMessage,
+  pushName = '',
+  contextResetAt = null,
+}) {
   const ai = getGeminiClient();
-  const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const fallbackModel =
-    process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite';
+    process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.1-flash-lite';
   const candidateModels = [...new Set([primaryModel, fallbackModel].filter(Boolean))];
   const googleFormUrl =
     process.env.GOOGLE_FORM_URL || 'https://forms.gle/PLACEHOLDER_GANTI_LINK_ASLI';
 
+  const chatLogFilter = buildChatLogFilter(phone, contextResetAt);
+
   const [knowledgeItems, recentLogsDesc] = await Promise.all([
     KnowledgeBase.find({}).sort({ category: 1, title: 1 }).lean(),
-    ChatLog.find({ phone })
+    ChatLog.find(chatLogFilter)
       .sort({ createdAt: -1 })
       .limit(CHAT_HISTORY_LIMIT)
       .lean(),
@@ -143,6 +157,7 @@ export async function generateMarketingReply({ phone, userMessage, pushName = ''
         model,
         contents,
         config: {
+          abortSignal: AbortSignal.timeout(8000),
           systemInstruction,
           temperature: 0.2,
           responseMimeType: 'application/json',
@@ -152,12 +167,15 @@ export async function generateMarketingReply({ phone, userMessage, pushName = ''
       break;
     } catch (error) {
       lastError = error;
-      const isRecoverable = [404, 429, 503].includes(error?.status);
+      const isTimeout =
+        error?.name === 'TimeoutError' || error?.name === 'AbortError';
+      const isRecoverable =
+        isTimeout || [404, 429, 503].includes(error?.status);
       if (!isRecoverable) {
         throw error;
       }
       console.warn(
-        `Model ${model} gagal (${error?.status}), mencoba model fallback...`
+        `Model ${model} gagal (${isTimeout ? 'timeout' : error?.status}), mencoba model fallback...`
       );
     }
   }

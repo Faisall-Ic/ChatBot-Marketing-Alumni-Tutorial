@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js",
+    "dev": "node --watch-path=index.js --watch-path=config --watch-path=middlewares --watch-path=models --watch-path=routes --watch-path=services --watch-path=utils index.js",
     "test": "node --test tests/*.test.js",
     "test:chat": "node scripts/test-chat.js",
     "seed:kb": "node scripts/seed-knowledge.js"

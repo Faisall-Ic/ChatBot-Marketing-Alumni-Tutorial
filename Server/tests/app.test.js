@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createApp } from '../index.js';
 import ChatLog from '../models/ChatLog.js';
 import Session from '../models/Session.js';
+import { buildChatLogFilter } from '../services/aiService.js';
 import { handleIncomingMessage } from '../services/orchestratorService.js';
+import {
+  getEscalationTimeoutMs,
+  isEscalationExpired,
+} from '../utils/escalation.js';
 import { isNumericPhone, normalizePhone } from '../utils/phone.js';
 
 describe('utils/phone', () => {
@@ -186,6 +191,7 @@ describe('orchestratorService', () => {
 
     assert.equal(saved, true);
     assert.equal(fakeSession.status, 'active');
+    assert.ok(fakeSession.contextResetAt instanceof Date);
     assert.match(res.replyText, /6281234567890/);
     assert.equal(res.notifyAdminText, null);
   });
@@ -228,5 +234,116 @@ describe('orchestratorService', () => {
 
     assert.match(res.replyText, /pesan berupa teks saja/i);
     assert.equal(res.notifyAdminText, null);
+  });
+
+  it('membatasi riwayat chat AI hanya setelah contextResetAt saat sesi direset', () => {
+    const resetAt = new Date('2026-11-27T07:36:00.000Z');
+    assert.deepEqual(buildChatLogFilter('6285794974290', null), {
+      phone: '6285794974290',
+    });
+    assert.deepEqual(buildChatLogFilter('6285794974290', resetAt), {
+      phone: '6285794974290',
+      createdAt: { $gt: resetAt },
+    });
+  });
+
+  it('PATCH /api/sessions/:phone/status mengatur contextResetAt saat diubah ke active', async (t) => {
+    let capturedUpdate = null;
+    t.mock.method(Session, 'findOneAndUpdate', (_filter, update) => {
+      capturedUpdate = update;
+      return {
+        lean: async () => ({
+          phone: '6285794974290',
+          status: 'active',
+          contextResetAt: update.$set.contextResetAt,
+        }),
+      };
+    });
+
+    const app = createApp();
+    const srv = await new Promise((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    const savedEnv = {
+      ADMIN_USERNAME: process.env.ADMIN_USERNAME,
+      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+      JWT_SECRET: process.env.JWT_SECRET,
+      DASHBOARD_API_KEY: process.env.DASHBOARD_API_KEY,
+    };
+
+    try {
+      delete process.env.ADMIN_USERNAME;
+      delete process.env.ADMIN_PASSWORD;
+      delete process.env.JWT_SECRET;
+      delete process.env.DASHBOARD_API_KEY;
+
+      const res = await fetch(
+        `http://127.0.0.1:${srv.address().port}/api/sessions/085794974290/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'active' }),
+        }
+      );
+      assert.equal(res.status, 200);
+      assert.equal(capturedUpdate.$set.status, 'active');
+      assert.equal(capturedUpdate.$set.escalatedAt, null);
+      assert.ok(capturedUpdate.$set.contextResetAt instanceof Date);
+    } finally {
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      await new Promise((resolve) => srv.close(resolve));
+    }
+  });
+
+  it('mengaktifkan kembali sesi escalated secara otomatis setelah melewati batas waktu 12 jam', async (t) => {
+    const savedTimeout = process.env.ESCALATION_TIMEOUT_HOURS;
+    process.env.ESCALATION_TIMEOUT_HOURS = '12';
+
+    try {
+      assert.equal(getEscalationTimeoutMs(), 12 * 60 * 60 * 1000);
+
+      const elevenHoursAgo = new Date(Date.now() - 11 * 60 * 60 * 1000);
+      const thirteenHoursAgo = new Date(Date.now() - 13 * 60 * 60 * 1000);
+
+      assert.equal(
+        isEscalationExpired({ status: 'escalated', escalatedAt: elevenHoursAgo }),
+        false
+      );
+      assert.equal(
+        isEscalationExpired({ status: 'escalated', escalatedAt: thirteenHoursAgo }),
+        true
+      );
+
+      let saved = false;
+      const expiredSession = {
+        phone: '628111222555',
+        status: 'escalated',
+        escalatedAt: thirteenHoursAgo,
+        contextResetAt: null,
+        async save() {
+          saved = true;
+        },
+      };
+
+      t.mock.method(Session, 'findOneAndUpdate', async () => expiredSession);
+
+      const res = await handleIncomingMessage({
+        phone: '08111222555',
+        text: '',
+        isMedia: true,
+      });
+
+      assert.equal(saved, true);
+      assert.equal(expiredSession.status, 'active');
+      assert.equal(expiredSession.escalatedAt, null);
+      assert.ok(expiredSession.contextResetAt instanceof Date);
+      assert.match(res.replyText, /pesan berupa teks saja/i);
+    } finally {
+      if (savedTimeout === undefined) delete process.env.ESCALATION_TIMEOUT_HOURS;
+      else process.env.ESCALATION_TIMEOUT_HOURS = savedTimeout;
+    }
   });
 });

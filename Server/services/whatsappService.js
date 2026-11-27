@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pino from 'pino';
@@ -308,9 +309,23 @@ async function connectSocket() {
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       if (statusCode === DisconnectReason.loggedOut) {
+        try {
+          if (fs.existsSync(AUTH_DIR)) {
+            for (const entry of fs.readdirSync(AUTH_DIR)) {
+              fs.rmSync(path.join(AUTH_DIR, entry), {
+                recursive: true,
+                force: true,
+              });
+            }
+          }
+        } catch (err) {
+          console.error('[WhatsApp] Gagal membersihkan sesi lama:', err.message);
+        }
+
         console.warn(
-          '[WhatsApp] Sesi WhatsApp telah logout. Hapus folder Server/auth_info_baileys lalu jalankan ulang untuk scan QR baru.'
+          `[WhatsApp] Sesi WhatsApp telah logout. Sesi lama dibersihkan otomatis, menyiapkan QR baru dalam ${RECONNECT_DELAY_MS / 1000} detik...`
         );
+        scheduleReconnect();
         return;
       }
 

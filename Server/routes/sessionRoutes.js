@@ -2,12 +2,15 @@ import { Router } from 'express';
 import ChatLog from '../models/ChatLog.js';
 import Session from '../models/Session.js';
 import { sendSafeWhatsAppMessage } from '../services/waBridge.js';
+import { releaseExpiredEscalations } from '../utils/escalation.js';
 import { normalizePhone } from '../utils/phone.js';
 
 const router = Router();
 
 router.get('/', async (req, res, next) => {
   try {
+    await releaseExpiredEscalations();
+
     const filter = {};
     if (req.query.status && ['active', 'escalated'].includes(req.query.status)) {
       filter.status = req.query.status;
@@ -67,6 +70,8 @@ router.get('/:phone/logs', async (req, res, next) => {
         ? Math.min(parsedLimit, 200)
         : 50;
 
+    await releaseExpiredEscalations();
+
     const [session, logsDesc] = await Promise.all([
       Session.findOne({ phone }).lean(),
       ChatLog.find({ phone }).sort({ createdAt: -1 }).limit(limit).lean(),
@@ -110,9 +115,19 @@ router.patch('/:phone/status', async (req, res, next) => {
       });
     }
 
+    const now = new Date();
+    const updateFields = {
+      status,
+      lastInteractionAt: now,
+      escalatedAt: status === 'escalated' ? now : null,
+    };
+    if (status === 'active') {
+      updateFields.contextResetAt = now;
+    }
+
     const updated = await Session.findOneAndUpdate(
       { phone },
-      { $set: { status, lastInteractionAt: new Date() } },
+      { $set: updateFields },
       { new: true }
     ).lean();
 

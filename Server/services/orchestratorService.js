@@ -1,5 +1,6 @@
 import ChatLog from '../models/ChatLog.js';
 import Session from '../models/Session.js';
+import { isEscalationExpired } from '../utils/escalation.js';
 import { isNumericPhone, normalizePhone } from '../utils/phone.js';
 import { generateMarketingReply } from './aiService.js';
 
@@ -45,8 +46,11 @@ async function handleAdminCommand({ senderPhone, text }) {
     };
   }
 
+  const now = new Date();
   session.status = 'active';
-  session.lastInteractionAt = new Date();
+  session.escalatedAt = null;
+  session.contextResetAt = now;
+  session.lastInteractionAt = now;
   await session.save();
 
   return {
@@ -111,15 +115,22 @@ export async function handleIncomingMessage({
   );
 
   if (session.status === 'escalated') {
-    const incomingLog = isMedia ? '[Media non-teks]' : text.trim();
-    if (incomingLog) {
-      await ChatLog.create({
-        phone: senderPhone,
-        role: 'user',
-        message: incomingLog,
-      });
+    if (isEscalationExpired(session, now)) {
+      session.status = 'active';
+      session.escalatedAt = null;
+      session.contextResetAt = now;
+      await session.save();
+    } else {
+      const incomingLog = isMedia ? '[Media non-teks]' : text.trim();
+      if (incomingLog) {
+        await ChatLog.create({
+          phone: senderPhone,
+          role: 'user',
+          message: incomingLog,
+        });
+      }
+      return null;
     }
-    return null;
   }
 
   if (isMedia) {
@@ -138,6 +149,7 @@ export async function handleIncomingMessage({
       phone: senderPhone,
       userMessage: cleanText,
       pushName,
+      contextResetAt: session.contextResetAt,
     });
   } catch (error) {
     console.error('Gagal memproses pesan dengan Gemini API:', error.message);
@@ -153,8 +165,10 @@ export async function handleIncomingMessage({
   ]);
 
   if (aiResult.intent === 'escalate') {
+    const escalatedNow = new Date();
     session.status = 'escalated';
-    session.lastInteractionAt = new Date();
+    session.escalatedAt = escalatedNow;
+    session.lastInteractionAt = escalatedNow;
     await session.save();
 
     return {

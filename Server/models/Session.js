@@ -9,6 +9,8 @@ const sessionSchema = new mongoose.Schema(
       default: 'active',
     },
     lastInteractionAt: { type: Date, default: Date.now },
+    escalatedAt: { type: Date, default: null },
+    contextResetAt: { type: Date, default: null },
   },
   {
     collection: 'sessions',
