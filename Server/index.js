@@ -5,7 +5,8 @@ import dotenv from 'dotenv';
 import express from 'express';
 import mongoose from 'mongoose';
 import { connectDB } from './config/db.js';
-import { apiKeyAuth } from './middlewares/apiKeyAuth.js';
+import { dashboardAuth } from './middlewares/apiKeyAuth.js';
+import authRoutes from './routes/authRoutes.js';
 import knowledgeRoutes from './routes/knowledgeRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
 import waRoutes from './routes/waRoutes.js';
@@ -56,9 +57,10 @@ export function createApp() {
     });
   });
 
-  app.use('/api/wa', apiKeyAuth, waRoutes);
-  app.use('/api/sessions', apiKeyAuth, sessionRoutes);
-  app.use('/api/knowledge', apiKeyAuth, knowledgeRoutes);
+  app.use('/api/auth', authRoutes);
+  app.use('/api/wa', dashboardAuth, waRoutes);
+  app.use('/api/sessions', dashboardAuth, sessionRoutes);
+  app.use('/api/knowledge', dashboardAuth, knowledgeRoutes);
 
   app.use((req, res) => {
     res.status(404).json({

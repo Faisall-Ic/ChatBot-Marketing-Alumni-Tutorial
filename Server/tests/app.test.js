@@ -25,11 +25,20 @@ describe('utils/phone', () => {
 describe('Express REST API & middleware', () => {
   let server;
   let baseUrl;
-  const originalKey = process.env.DASHBOARD_API_KEY;
-  const originalClientUrl = process.env.CLIENT_URL;
+  const savedEnv = {};
+  const trackedKeys = [
+    'DASHBOARD_API_KEY',
+    'CLIENT_URL',
+    'ADMIN_USERNAME',
+    'ADMIN_PASSWORD',
+    'JWT_SECRET',
+  ];
 
   beforeEach(async () => {
-    delete process.env.DASHBOARD_API_KEY;
+    for (const key of trackedKeys) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
     process.env.CLIENT_URL = 'http://localhost:5173';
     const app = createApp();
     await new Promise((resolve) => {
@@ -42,11 +51,10 @@ describe('Express REST API & middleware', () => {
   });
 
   afterEach(async () => {
-    if (originalKey === undefined) delete process.env.DASHBOARD_API_KEY;
-    else process.env.DASHBOARD_API_KEY = originalKey;
-
-    if (originalClientUrl === undefined) delete process.env.CLIENT_URL;
-    else process.env.CLIENT_URL = originalClientUrl;
+    for (const key of trackedKeys) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
 
     await new Promise((resolve) => server.close(resolve));
   });
@@ -78,6 +86,48 @@ describe('Express REST API & middleware', () => {
       headers: { 'x-api-key': 'rahasia-tim-alto' },
     });
     assert.equal(authRes.status, 200);
+  });
+
+  it('memproses login admin (.env) dan melindungi endpoint dengan JWT Bearer token', async () => {
+    process.env.ADMIN_USERNAME = 'admin';
+    process.env.ADMIN_PASSWORD = 'password-test-alto';
+    process.env.JWT_SECRET = 'jwt-secret-test-alto-32-chars-min';
+
+    const noTokenRes = await fetch(`${baseUrl}/api/wa/status`);
+    assert.equal(noTokenRes.status, 401);
+
+    const badPassRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'salah' }),
+    });
+    assert.equal(badPassRes.status, 401);
+
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'admin',
+        password: 'password-test-alto',
+      }),
+    });
+    assert.equal(loginRes.status, 200);
+    const loginBody = await loginRes.json();
+    assert.equal(loginBody.success, true);
+    assert.equal(loginBody.data.tokenType, 'Bearer');
+    assert.ok(loginBody.data.token);
+
+    const meRes = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${loginBody.data.token}` },
+    });
+    assert.equal(meRes.status, 200);
+    const meBody = await meRes.json();
+    assert.deepEqual(meBody.data, { username: 'admin', role: 'admin' });
+
+    const invalidTokenRes = await fetch(`${baseUrl}/api/wa/status`, {
+      headers: { Authorization: `Bearer ${loginBody.data.token}x` },
+    });
+    assert.equal(invalidTokenRes.status, 401);
   });
 
   it('memvalidasi input buruk pada /api/knowledge dan /api/sessions', async () => {
